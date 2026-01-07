@@ -1,37 +1,42 @@
-# Plan zur Steuerung des Heizstabs mittels Shelly Pro 3 EM und Shelly Plus 0-10V
+# Plan zur Steuerung des Heizstabs (Update)
 
-## 1. Analyse und Vorbereitung
-- [ ] **Bestehendes Script sichten**: Bitte stelle das aktuelle Script zur Verfügung (z.B. als `script.js` im Chat oder Datei-Upload), damit ich analysieren kann, warum der Dimmer zwar in der App reagiert, aber der physikalische Ausgang nicht schaltet.
-- [ ] **Dokumentation prüfen**: 
-    - Shelly Gen2/Gen3 API für RPC/HTTP Requests prüfen.
-    - Sicherstellen, dass die Steuerbefehle (HTTP Request vs. RPC) für den Shelly Plus 0-10V Dimmer korrekt sind. Häufiges Problem: `turn=on` fehlt oder falscher Endpunkt (`/rpc/Light.Set` vs `/color/0` etc.).
+## 1. Analyse der Ausgangslage
+- **Geräte**:
+  - **Sensor**: Shelly Pro 3 EM (Gen 2) - IP: 192.168.178.185
+  - **Aktor**: Shelly Plus 0-10V (Gen 2) - IP: 192.168.178.186
+- **Problem**:
+  - Bestehendes Script funktioniert "in der App" (Anzeige ändert sich), aber physikalischer Ausgang (0-10V) ändert sich nicht.
+  - PDF enthält **Gen 1 API Befehle** (`/light/0?turn=on`), aber der Shelly Plus 0-10V benötigt die **Gen 2 RPC API** (`/rpc/Light.Set`).
+  - Wenn das aktuelle Script Gen 1 Befehle nutzt, dürfte der Shelly Plus 0-10V eigentlich gar nicht reagieren. Dass er in der App reagiert, deutet auf ein seltsames Verhalten oder ein Missverständnis hin (vielleicht sendet das Script doch RPCs?).
 
-## 2. Fehlersuche im bestehenden Code
-- Analyse der HTTP-Aufrufe. Funktioniert der Aufruf `http://192.168.178.186/...` wirklich korrekt?
-- Prüfung der "Brightness"-Logik.
-- Prüfung, ob `timer` korrekt gesetzt sind (Shelly Scripts sind event-basiert oder laufen in Timern).
+## 2. Strategie
+Da das Debuggen des alten Scripts ohne den Code schwierig ist und wir Versionskonflikte vermuten, ist die **Erstellung eines neuen, sauberen Scripts** (Variante 1 aus dem Chat) der sicherste Weg.
 
-## 3. Implementierung / Optimierung (Neues Script)
-Wir werden uns entscheiden müssen zwischen **Variante 1 (Direkte Berechnung)** und **Variante 2 (Inkrementell)**. 
-*Empfehlung*: **Variante 1** ist meist stabiler für PV-Überschuss, da sie direkt auf den aktuellen Messwert reagiert.
+### Neues Script (läuft auf Shelly Pro 3 EM):
+Das Script wird direkt auf dem Shelly Pro 3 EM laufen (da dieser die Messwerte hat) und per HTTP-Request den Dimmer steuern.
 
-### Geplante Logik (Variante 1 - Angepasst):
-1.  **Messung**: Alle X Sekunden (z.B. 2s) die Gesamtleistung vom Shelly Pro 3 EM abfragen.
-2.  **Berechnung**:
-    - Wenn `Leistung < -30W` (Einspeisung): 
-        - Berechne Dimmer-Level: `(Abs(Leistung) - 30) / 3000 * 100`.
-        - Sende `Licht AN` + `Brightness` an IP `192.168.178.186`.
-    - Wenn `Leistung > 0` (Bezug):
-        - Sende `Licht AUS` oder `Brightness 0`.
-3.  **Sonderlogik (Hysterese/Erweiterung)**:
-    - Wenn `Brightness > 100`:
-        - Prüfen, ob die anderen 3 Heizstäbe schon an sind (Status-Abfrage notwendig oder Variable setzen?).
-        - Wenn nicht alle an: Dimmer für 5 Sekunden AUS (damit externe Logik die großen Heizstäbe zuschalten kann).
-    - Temperatur-Check: Wenn Puffer > 85°C -> AUS.
+#### Logik-Ablauf (Schleife alle x Sekunden):
+1.  **Leistung messen**: Abruf von `Switch.GetStatus` oder `EM.GetStatus` (id:0) auf dem Pro 3 EM (local). Summe aller Phasen (`total_act_power`).
+2.  **Entscheidung**:
+    - **Fall A (Einspeisung < -30W)**:
+        - Verfügbare Leistung = `abs(total_act_power)`.
+        - Ziel-Helligkeit = `(Verfügbare Leistung - 30W Puffer) / 30W_pro_Prozent`.
+        - Begrenzung auf 0-100%.
+        - Sende RPC an Dimmer: `http://192.168.178.186/rpc/Light.Set?id=0&on=true&brightness=X`.
+    - **Fall B (Bezug > 0W)**:
+        - Sende RPC an Dimmer: `http://192.168.178.186/rpc/Light.Set?id=0&on=false` (oder brightness=0).
+3.  **Hysterese/Schutz**:
+    - Wenn Helligkeit > 100% (virtuell) -> Prüfen ob andere Heizstäbe an müssen (Optional, erst mal Basis-Funktion sicherstellen).
+    - Optional: Temperatur-Check (wenn IP bekannt).
 
-## 4. Offene Fragen für das Script
-- Wie ermitteln wir den Status der "anderen 3 Heizstäbe"? Haben diese feste IPs (Shellys)?
-- Wie lesen wir die Temperatur aus? (IP des Shelly mit Temp-Sensor?)
+## 3. Nächste Schritte
+1.  **Ich erstelle das Script `pv_heater_control.js`** basierend auf der Gen 2 RPC API.
+2.  Du kopierst dieses Script auf den Shelly Pro 3 EM.
+3.  Wir testen, ob der Shelly Plus 0-10V nun physikalisch reagiert.
 
-## Nächste Schritte
-Bitte kopiere den **aktuellen Code** hier in den Chat oder lade die Datei hoch.
+## Offene Punkte
+- Temperatur-Überwachung: Welche IP hat der Shelly mit dem Temp-Sensor? (User erwähnte "einen der drei letzt genannten shellys"). Wir lassen das vorerst draußen oder fügen einen Platzhalter ein.
+- Status der anderen 3 Heizstäbe: Wie werden diese abgefragt? (IPs?). Vorerst ignorieren wir das und fokussieren uns auf die Regelung des Dimmers.
+
+---
+**Bereit zur Erstellung des Scripts?**
