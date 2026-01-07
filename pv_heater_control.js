@@ -1,17 +1,21 @@
 /**
- * Shelly Script: PV-Überschusssteuerung für Heizstab (v2)
+ * Shelly Script: PV-Überschusssteuerung für Heizstab (v3)
  * 
  * Host: Shelly Pro 3 EM
- * Target: Shelly Plus 0-10V
+ * Target: Shelly Plus 0-10V (Gen2) oder Shelly Dimmer 2 (Gen1)
  * 
- * Änderungen v2:
- * - Nutzung von Shelly.GetStatus() statt EM.GetStatus(), um Fehler -103 zu vermeiden.
- * - Manuelle Summenbildung der Phasen A, B, C.
+ * Änderungen v3:
+ * - Fix für Fehler -103: Nutzung von EM.GetStatus mit expliziter ID statt Shelly.GetStatus.
+ * - Sequenzielle Abfrage der Phasen L1, L2, L3.
+ * - Unterstützung für Gen1 Dimmer (via config).
  */
 
 let CONFIG = {
-  // IP des Shelly Plus 0-10V Dimmers
+  // IP des Shelly Dimmers
   dimmerIp: "192.168.178.186",
+  
+  // Typ des Dimmers: "Gen2" (z.B. Shelly Plus 0-10V) oder "Gen1" (z.B. Shelly Dimmer 2)
+  dimmerType: "Gen2", 
   
   // Nennleistung des Heizstabs in Watt (bei 100%)
   heaterPower: 3000,
@@ -39,12 +43,20 @@ function setDimmer(brightness) {
   if (brightness === lastBrightness) return;
   
   let switchOn = brightness > 0;
-  
-  // URL für Shelly Plus 0-10V (Gen 2 RPC)
-  let url = "http://" + CONFIG.dimmerIp + "/rpc/Light.Set?id=0&on=" + (switchOn ? "true" : "false") + "&brightness=" + brightness;
+  let url = "";
+
+  if (CONFIG.dimmerType === "Gen1") {
+    // Gen 1 API (Shelly Dimmer 2)
+    // http://ip/light/0?turn=on&brightness=xx
+    let action = switchOn ? "on" : "off";
+    url = "http://" + CONFIG.dimmerIp + "/light/0?turn=" + action + "&brightness=" + brightness;
+  } else {
+    // Gen 2 RPC API (Shelly Plus 0-10V)
+    url = "http://" + CONFIG.dimmerIp + "/rpc/Light.Set?id=0&on=" + (switchOn ? "true" : "false") + "&brightness=" + brightness;
+  }
 
   if (CONFIG.debug) {
-    print("Setze Dimmer: " + brightness + "%");
+    print("Setze Dimmer (" + CONFIG.dimmerType + "): " + brightness + "%");
   }
 
   Shelly.call(
@@ -60,45 +72,42 @@ function setDimmer(brightness) {
   );
 }
 
-function controlLoop() {
-  // Wir nutzen Shelly.GetStatus (ohne Parameter), um den Status aller Komponenten zu holen.
-  // Das vermeidet ID-Fehler und funktioniert auf allen Gen2 Geräten.
+// Hilfsfunktion zum Abrufen einer Phase
+function getPhasePower(id, callback) {
   Shelly.call(
-    "Shelly.GetStatus",
-    {},
+    "EM.GetStatus",
+    { id: id },
     function (result, error_code, error_message) {
       if (error_code !== 0) {
-        print("Fehler beim Status-Abruf: " + error_message + " (Code: " + error_code + ")");
-        return;
+        print("Fehler beim Abruf EM:" + id + " -> " + error_message + " (" + error_code + ")");
+        // Wir nehmen 0 an, damit das Skript nicht abbricht, aber loggen den Fehler.
+        callback(0);
+      } else {
+        // EM.GetStatus liefert das Objekt direkt zurück (z.B. { id:0, act_power: ... })
+        let power = (typeof result.act_power !== 'undefined') ? result.act_power : 0;
+        callback(power);
       }
-
-      // Berechnung der Gesamtleistung aus den 3 Phasen
-      // Pro 3 EM liefert em:0, em:1, em:2
-      let pA = 0, pB = 0, pC = 0;
-      
-      if (result["em:0"] && typeof result["em:0"].act_power !== 'undefined') {
-        pA = result["em:0"].act_power;
-      }
-      if (result["em:1"] && typeof result["em:1"].act_power !== 'undefined') {
-        pB = result["em:1"].act_power;
-      }
-      if (result["em:2"] && typeof result["em:2"].act_power !== 'undefined') {
-        pC = result["em:2"].act_power;
-      }
-      
-      // Falls keys anders heißen (z.B. nur 'em' array?), prüfen wir Alternativen,
-      // aber result["em:0"] ist Standard bei Gen 2 RPC.
-      
-      let totalPower = pA + pB + pC;
-
-      if (CONFIG.debug) {
-        // Nur alle paar Mal loggen oder bei Änderung? Hier immer, zum Debuggen.
-        print("Leistung: L1=" + pA + " L2=" + pB + " L3=" + pC + " => Total=" + totalPower + " W");
-      }
-
-      calculateAndSet(totalPower);
     }
   );
+}
+
+function controlLoop() {
+  // Sequenzielle Abfrage der 3 Phasen, um -103 Fehler durch falsche Aufrufe zu vermeiden
+  getPhasePower(0, function(pA) {
+    getPhasePower(1, function(pB) {
+      getPhasePower(2, function(pC) {
+        
+        let totalPower = pA + pB + pC;
+
+        if (CONFIG.debug) {
+          print("Leistung: L1=" + pA + " L2=" + pB + " L3=" + pC + " => Total=" + totalPower + " W");
+        }
+
+        calculateAndSet(totalPower);
+        
+      });
+    });
+  });
 }
 
 function calculateAndSet(totalPower) {
@@ -118,13 +127,14 @@ function calculateAndSet(totalPower) {
   // Dämpfung 0.5 -> +8%
   let step = -(powerDiff / wattPerPercent) * 0.5; 
   
+  // Kleine Schritte ignorieren (Hysterese/Rauschen)
   if (Math.abs(step) < 0.5) {
     step = 0; 
   }
 
   newBrightness = lastBrightness + step;
   
-  // Bei starkem Bezug (>100W) schneller runterregeln
+  // Bei starkem Bezug (>100W) schneller runterregeln, um Bezug zu vermeiden
   if (totalPower > 100) {
       newBrightness -= 5; 
   }
@@ -133,11 +143,8 @@ function calculateAndSet(totalPower) {
   if (newBrightness < 0) newBrightness = 0;
   if (newBrightness > 100) newBrightness = 100;
   
-  // Debug Ausgabe für Berechnung
-  // print("Step: " + step.toFixed(2) + " -> Neu: " + newBrightness.toFixed(1));
-  
   setDimmer(newBrightness);
 }
 
 Timer.set(CONFIG.interval, true, controlLoop);
-print("PV Heater Control v2 gestartet");
+print("PV Heater Control v3 gestartet");
