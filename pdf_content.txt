@@ -1,0 +1,76 @@
+HTTP-Request Shelly Dimmer/2
+HTTP-Request Shelly Dimmer
+HTTP-Request with Original-Firmware:
+Enter in the address bar of the browser:
+switch ShellyDimmer ON:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?turn=on
+switch ShellyDimmer OFF:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?turn=off
+switch ShellyDimmer TOGGLE:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?turn=toggle
+switch ShellyDimmer ON with Timer in s:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?turn=on&timer=30
+switch ShellyDimmer OFF with Timer in s:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?turn=off&timer=30
+switch ShellyDimmer ON and brightness in %:
+CODE
+Code
+
+https://shelly-forum.com/lexikon/entry/147-http-request-shelly-dimmer-2/
+
+1
+
+http://192.168.xxx.xxx/light/0?turn=on&brightness=70
+ShellyDimmer set brightness in %:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?brightness=70
+increase Dimming begin*1 ShellyDimmer: um 30%:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?dim=up&step=30
+decrease Dimming begin*1 ShellyDimmer: um 20%:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?dim=down&step=20
+ShellyDimmer dimming stop:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?dim=stop
+ShellyDimmer dimming cycle *2:
+CODE
+Code
+http://192.168.xxx.xxx/light/0?dim=cycle
+*1 until receive another command
+*2 cycle: Up/Stop/Down/Stop/...
+
+If an authorization is required:
+switch ShellyDimmer ON:
+CODE
+
+https://shelly-forum.com/lexikon/entry/147-http-request-shelly-dimmer-2/
+
+2
+
+Code
+http://user:pass@192.168.xxx.xxx/light/0?turn=on
+user: user name to adjust
+pass: password to adjust
+
+The IP address must of course be adapted to the home network and the respective Shelly device.
+
+https://shelly-forum.com/lexikon/entry/147-http-request-shelly-dimmer-2/
+
+3
+
+
