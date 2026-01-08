@@ -72,41 +72,41 @@ function setDimmer(brightness) {
   );
 }
 
-// Hilfsfunktion zum Abrufen einer Phase
-function getPhasePower(id, callback) {
+// Hilfsfunktion zum Abrufen der Leistung (Shelly Pro 3 EM liefert alle Phasen in EM:0)
+function getPowerStatus(callback) {
   Shelly.call(
     "EM.GetStatus",
-    { id: id },
+    { id: 0 },
     function (result, error_code, error_message) {
       if (error_code !== 0) {
-        print("Fehler beim Abruf EM:" + id + " -> " + error_message + " (" + error_code + ")");
-        // Wir nehmen 0 an, damit das Skript nicht abbricht, aber loggen den Fehler.
-        callback(0);
+        print("Fehler beim Abruf EM:0 -> " + error_message + " (" + error_code + ")");
+        callback(0, 0, 0);
       } else {
-        // EM.GetStatus liefert das Objekt direkt zurück (z.B. { id:0, act_power: ... })
-        let power = (typeof result.act_power !== 'undefined') ? result.act_power : 0;
-        callback(power);
+        // Pro 3 EM liefert a_act_power, b_act_power, c_act_power in einem Objekt
+        let pA = (typeof result.a_act_power !== 'undefined') ? result.a_act_power : 0;
+        let pB = (typeof result.b_act_power !== 'undefined') ? result.b_act_power : 0;
+        let pC = (typeof result.c_act_power !== 'undefined') ? result.c_act_power : 0;
+
+        // Fallback für Geräte die doch act_power nutzen (oder Einzelphase)
+        if (typeof result.act_power !== 'undefined') {
+            pA = result.act_power;
+        }
+        
+        callback(pA, pB, pC);
       }
     }
   );
 }
 
 function controlLoop() {
-  // Sequenzielle Abfrage der 3 Phasen, um -103 Fehler durch falsche Aufrufe zu vermeiden
-  getPhasePower(0, function(pA) {
-    getPhasePower(1, function(pB) {
-      getPhasePower(2, function(pC) {
-        
-        let totalPower = pA + pB + pC;
-
-        if (CONFIG.debug) {
-          print("Leistung: L1=" + pA + " L2=" + pB + " L3=" + pC + " => Total=" + totalPower + " W");
-        }
-
-        calculateAndSet(totalPower);
-        
-      });
-    });
+  getPowerStatus(function(pA, pB, pC) {
+    let totalPower = pA + pB + pC;
+    
+    if (CONFIG.debug) {
+       print("Leistung: L1=" + pA + " L2=" + pB + " L3=" + pC + " => Total=" + totalPower + " W");
+    }
+    
+    calculateAndSet(totalPower);
   });
 }
 
