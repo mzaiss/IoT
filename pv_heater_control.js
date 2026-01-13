@@ -8,6 +8,9 @@
  * - Fix für Fehler -103: Nutzung von EM.GetStatus mit expliziter ID statt Shelly.GetStatus.
  * - Sequenzielle Abfrage der Phasen L1, L2, L3.
  * - Unterstützung für Gen1 Dimmer (via config).
+ * 
+ * Änderungen Refinement:
+ * - Abschaltung des Dimmers für konfigurierbare Zeit, wenn 100% Helligkeit und weiterhin Einspeisung (für andere Verbraucher).
  */
 
 let CONFIG = {
@@ -29,11 +32,18 @@ let CONFIG = {
   // Ziel-Einspeisung (Puffer)
   targetMargin: -20,
 
+  // Schwelle für kurzzeitige Abschaltung bei 100% (in Watt, negativ = Einspeisung)
+  excessDetectThreshold: -50,
+
+  // Dauer der Abschaltung in ms (wenn Verbraucher zuschalten sollen)
+  offDuration: 5000,
+
   // Debug-Modus
   debug: true
 };
 
 let lastBrightness = 0;
+let dimmerPaused = false;
 
 function setDimmer(brightness) {
   if (brightness < 0) brightness = 0;
@@ -111,6 +121,26 @@ function controlLoop() {
 }
 
 function calculateAndSet(totalPower) {
+  if (dimmerPaused) {
+    if (CONFIG.debug) print("Dimmer pausiert für Verbraucher-Check...");
+    return;
+  }
+
+  // Check: Wenn 100% an und immer noch Überschuss > Threshold -> kurz abschalten
+  if (lastBrightness >= 100 && totalPower < CONFIG.excessDetectThreshold) {
+    if (CONFIG.debug) {
+      print("Maximale Helligkeit und weiterer Überschuss (" + totalPower + "W). Schalte kurz ab für " + CONFIG.offDuration + "ms.");
+    }
+    setDimmer(0);
+    dimmerPaused = true;
+    
+    Timer.set(CONFIG.offDuration, false, function() {
+      dimmerPaused = false;
+      if (CONFIG.debug) print("Pause beendet, Regelung wieder aktiv.");
+    });
+    return;
+  }
+
   let newBrightness = lastBrightness;
   
   // Regelabweichung: Ist-Wert - Soll-Wert
@@ -147,4 +177,4 @@ function calculateAndSet(totalPower) {
 }
 
 Timer.set(CONFIG.interval, true, controlLoop);
-print("PV Heater Control v3 gestartet");
+print("PV Heater Control v3 (mit Pause-Funktion) gestartet");
