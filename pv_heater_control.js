@@ -35,6 +35,12 @@ let CONFIG = {
   // Schwelle für kurzzeitige Abschaltung bei 100% (in Watt, negativ = Einspeisung)
   excessDetectThreshold: -50,
 
+  // IP der Shelly, die die Abschaltung verhindert, wenn sie AN ist (z.B. Heizstab 2)
+  overrideShellyIp: "192.168.178.198",
+  
+  // Typ der Override-Shelly: "Gen1" (z.B. Shelly 1, Plug S) oder "Gen2" (z.B. Plus 1, Plus Plug S)
+  overrideShellyType: "Gen1", 
+
   // Dauer der Abschaltung in ms (wenn Verbraucher zuschalten sollen)
   offDuration: 5000,
 
@@ -108,6 +114,65 @@ function getPowerStatus(callback) {
   );
 }
 
+function performPause(totalPower) {
+    if (CONFIG.debug) {
+      print("Maximale Helligkeit und weiterer Überschuss (" + totalPower + "W). Schalte kurz ab für " + CONFIG.offDuration + "ms.");
+    }
+    setDimmer(0);
+    dimmerPaused = true;
+    
+    Timer.set(CONFIG.offDuration, false, function() {
+      dimmerPaused = false;
+      if (CONFIG.debug) print("Pause beendet, Regelung wieder aktiv.");
+    });
+}
+
+function checkOverrideAndPause(totalPower) {
+    // Wenn keine IP konfiguriert ist, direkt pausieren
+    if (!CONFIG.overrideShellyIp || CONFIG.overrideShellyIp === "") {
+        performPause(totalPower);
+        return;
+    }
+
+    let url = "";
+    if (CONFIG.overrideShellyType === "Gen1") {
+        // Gen 1: /relay/0/status liefert { ison: true/false ... }
+        url = "http://" + CONFIG.overrideShellyIp + "/relay/0/status"; 
+    } else {
+        // Gen 2: RPC
+        url = "http://" + CONFIG.overrideShellyIp + "/rpc/Switch.GetStatus?id=0";
+    }
+
+    Shelly.call("HTTP.GET", { url: url }, function(res, err_code, err_msg) {
+        if (err_code !== 0) {
+            if (CONFIG.debug) print("Fehler beim Check Override-Shelly: " + err_msg + ". Führe Pause aus.");
+            performPause(totalPower);
+            return;
+        }
+
+        let isOne = false;
+        try {
+            let data = JSON.parse(res.body);
+            if (CONFIG.overrideShellyType === "Gen1") {
+                isOne = data.ison === true;
+            } else {
+                isOne = data.output === true;
+            }
+        } catch(e) {
+            if (CONFIG.debug) print("JSON Parse Fehler Override-Shelly. Führe Pause aus.");
+            performPause(totalPower);
+            return;
+        }
+
+        if (isOne) {
+            if (CONFIG.debug) print("Override-Shelly (" + CONFIG.overrideShellyIp + ") ist AN. Keine Pause.");
+            // Do nothing, just return. The dimmer stays at 100%.
+        } else {
+            performPause(totalPower);
+        }
+    });
+}
+
 function controlLoop() {
   getPowerStatus(function(pA, pB, pC) {
     let totalPower = pA + pB + pC;
@@ -126,18 +191,9 @@ function calculateAndSet(totalPower) {
     return;
   }
 
-  // Check: Wenn 100% an und immer noch Überschuss > Threshold -> kurz abschalten
+  // Check: Wenn 100% an und immer noch Überschuss > Threshold -> ggf. kurz abschalten
   if (lastBrightness >= 100 && totalPower < CONFIG.excessDetectThreshold) {
-    if (CONFIG.debug) {
-      print("Maximale Helligkeit und weiterer Überschuss (" + totalPower + "W). Schalte kurz ab für " + CONFIG.offDuration + "ms.");
-    }
-    setDimmer(0);
-    dimmerPaused = true;
-    
-    Timer.set(CONFIG.offDuration, false, function() {
-      dimmerPaused = false;
-      if (CONFIG.debug) print("Pause beendet, Regelung wieder aktiv.");
-    });
+    checkOverrideAndPause(totalPower);
     return;
   }
 
