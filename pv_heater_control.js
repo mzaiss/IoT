@@ -152,14 +152,25 @@ function checkOverrideAndPause(totalPower) {
 
         let isOne = false;
         try {
-            let data = JSON.parse(res.body);
+            let data;
+            // Handle potentially already parsed body or raw string
+            if (typeof res.body === 'object') {
+                data = res.body;
+            } else {
+                data = JSON.parse(res.body);
+            }
+
             if (CONFIG.overrideShellyType === "Gen1") {
                 isOne = data.ison === true;
             } else {
                 isOne = data.output === true;
             }
         } catch(e) {
-            if (CONFIG.debug) print("JSON Parse Fehler Override-Shelly. Führe Pause aus.");
+            if (CONFIG.debug) {
+                print("JSON Parse Fehler Override-Shelly: " + e);
+                if (typeof res !== 'undefined' && res.body) print("Response body: " + res.body);
+                print("Führe Pause aus.");
+            }
             performPause(totalPower);
             return;
         }
