@@ -1,5 +1,5 @@
 /**
- * Shelly Script: PV-Überschusssteuerung für Heizstab (v3)
+ * Shelly Script: PV-Überschusssteuerung für Heizstab (v4)
  * 
  * Host: Shelly Pro 3 EM
  * Target: Shelly Plus 0-10V (Gen2) oder Shelly Dimmer 2 (Gen1)
@@ -11,6 +11,13 @@
  * 
  * Änderungen Refinement:
  * - Abschaltung des Dimmers für konfigurierbare Zeit, wenn 100% Helligkeit und weiterhin Einspeisung (für andere Verbraucher).
+ * 
+ * Änderungen v4:
+ * - Fix: Dimmer blieb nicht bei 100% wenn Override-Shelly (2. Heizstab) AN war.
+ *   Ursache: HTTP-Fehler beim Override-Check führten direkt zur Pause.
+ * - Re-Entrance-Guard: Verhindert mehrere gleichzeitige HTTP-Calls zum Override-Shelly.
+ * - Caching: Override-Status wird für mehrere Zyklen gecacht.
+ * - Sicherer Default: Bei HTTP-Fehler wird NICHT pausiert (Dimmer bleibt an).
  */
 
 let CONFIG = {
@@ -44,12 +51,19 @@ let CONFIG = {
   // Dauer der Abschaltung in ms (wenn Verbraucher zuschalten sollen)
   offDuration: 5000,
 
+  // Anzahl der Regelzyklen, für die der Override-Status gecacht wird
+  // (z.B. 5 Zyklen * 2s Intervall = 10s Cache)
+  overrideCacheLoops: 5,
+
   // Debug-Modus
   debug: true
 };
 
 let lastBrightness = 0;
 let dimmerPaused = false;
+let checkingOverride = false;
+let cachedOverrideOn = false;
+let overrideCacheRemaining = 0;
 
 function setDimmer(brightness) {
   if (brightness < 0) brightness = 0;
@@ -128,32 +142,55 @@ function performPause(totalPower) {
 }
 
 function checkOverrideAndPause(totalPower) {
-    // Wenn keine IP konfiguriert ist, direkt pausieren
+    // Wenn keine Override-IP konfiguriert ist, direkt pausieren
     if (!CONFIG.overrideShellyIp || CONFIG.overrideShellyIp === "") {
         performPause(totalPower);
         return;
     }
 
+    // Re-Entrance-Guard: Wenn bereits ein Check läuft, nicht erneut starten.
+    // Dimmer bleibt bei 100% während wir warten (sicher).
+    if (checkingOverride) {
+        if (CONFIG.debug) print("Override-Check läuft bereits, warte...");
+        return;
+    }
+
+    // Gecachten Wert verwenden, wenn noch gültig
+    if (overrideCacheRemaining > 0) {
+        overrideCacheRemaining--;
+        if (cachedOverrideOn) {
+            if (CONFIG.debug) print("Override-Shelly (cached) ist AN. Keine Pause. (Cache: " + overrideCacheRemaining + " Zyklen übrig)");
+            return;
+        } else {
+            if (CONFIG.debug) print("Override-Shelly (cached) ist AUS. Führe Pause aus.");
+            performPause(totalPower);
+            return;
+        }
+    }
+
+    // Neuen HTTP-Check starten
+    checkingOverride = true;
+
     let url = "";
     if (CONFIG.overrideShellyType === "Gen1") {
-        // Gen 1: /relay/0/status liefert { ison: true/false ... }
         url = "http://" + CONFIG.overrideShellyIp + "/relay/0/status"; 
     } else {
-        // Gen 2: RPC
         url = "http://" + CONFIG.overrideShellyIp + "/rpc/Switch.GetStatus?id=0";
     }
 
     Shelly.call("HTTP.GET", { url: url }, function(res, err_code, err_msg) {
+        checkingOverride = false;
+
         if (err_code !== 0) {
-            if (CONFIG.debug) print("Fehler beim Check Override-Shelly: " + err_msg + ". Führe Pause aus.");
-            performPause(totalPower);
+            if (CONFIG.debug) print("Fehler beim Check Override-Shelly: " + err_msg + " (" + err_code + "). Bleibe bei 100% (sicherer Default).");
+            // Bei Fehler NICHT pausieren - sicherer Default ist, bei 100% zu bleiben,
+            // um möglichst viel Eigenverbrauch zu gewährleisten.
             return;
         }
 
-        let isOne = false;
+        let isOn = false;
         try {
             let data;
-            // Handle potentially already parsed body or raw string
             if (typeof res.body === 'object') {
                 data = res.body;
             } else {
@@ -161,24 +198,28 @@ function checkOverrideAndPause(totalPower) {
             }
 
             if (CONFIG.overrideShellyType === "Gen1") {
-                isOne = data.ison === true;
+                isOn = data.ison === true;
             } else {
-                isOne = data.output === true;
+                isOn = data.output === true;
             }
         } catch(e) {
             if (CONFIG.debug) {
                 print("JSON Parse Fehler Override-Shelly: " + e);
                 if (typeof res !== 'undefined' && res.body) print("Response body: " + res.body);
-                print("Führe Pause aus.");
+                print("Bleibe bei 100% (sicherer Default).");
             }
-            performPause(totalPower);
+            // Bei Parse-Fehler NICHT pausieren
             return;
         }
 
-        if (isOne) {
-            if (CONFIG.debug) print("Override-Shelly (" + CONFIG.overrideShellyIp + ") ist AN. Keine Pause.");
-            // Do nothing, just return. The dimmer stays at 100%.
+        // Ergebnis cachen
+        cachedOverrideOn = isOn;
+        overrideCacheRemaining = CONFIG.overrideCacheLoops;
+
+        if (isOn) {
+            if (CONFIG.debug) print("Override-Shelly (" + CONFIG.overrideShellyIp + ") ist AN. Keine Pause. (Cache gesetzt: " + CONFIG.overrideCacheLoops + " Zyklen)");
         } else {
+            if (CONFIG.debug) print("Override-Shelly (" + CONFIG.overrideShellyIp + ") ist AUS. Führe Pause aus.");
             performPause(totalPower);
         }
     });
@@ -244,4 +285,4 @@ function calculateAndSet(totalPower) {
 }
 
 Timer.set(CONFIG.interval, true, controlLoop);
-print("PV Heater Control v3 (mit Pause-Funktion) gestartet");
+print("PV Heater Control v4 (Override-Fix) gestartet");
