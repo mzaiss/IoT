@@ -1,0 +1,10 @@
+{
+  "esversion": 6,
+  "undef": true,
+  "unused": true,
+  "globals": {
+    "Shelly": false,
+    "Timer": false,
+    "print": false
+  }
+}
