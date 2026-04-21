@@ -1,25 +1,10 @@
-# Shelly PV-Überschusssteuerung: Anleitung
+# IoT – Shelly-Skripte und Dokumentation
 
-Dieses Script steuert einen **Shelly Plus 0-10V** (Dimmer) basierend auf der gemessenen Leistung eines **Shelly Pro 3 EM**, um überschüssigen PV-Strom für einen Heizstab zu nutzen.
+Dieses Repository enthält **eigenständige kleine Projekte** (jeweils Script, Anleitung und ggf. Referenzmaterial) rund um **Shelly**-Geräte.
 
-## Update (v2)
-Das Script wurde aktualisiert, um den Fehler `-103 missing or bad argument "id"` zu beheben. Bitte verwenden Sie den neuen Code.
+| Ordner | Inhalt |
+|--------|--------|
+| [`shelly-pv-heater-surplus/`](shelly-pv-heater-surplus/) | PV-Überschusssteuerung: Shelly Pro 3 EM misst, **Shelly Plus 0-10V** regelt einen Heizstab. |
+| [`shelly-motor-pulse-wildlife/`](shelly-motor-pulse-wildlife/) | Periodischer **Motor-/Relais-Puls** (z. B. Shelly 1 Gen3) für kurzes Geräusch im festen Rhythmus. |
 
-## Installation
-
-1.  Öffnen Sie die Weboberfläche des **Shelly Pro 3 EM** (Messgerät) im Browser:  
-    `http://192.168.178.185`
-2.  Navigieren Sie im Menü links zu **Scripts**.
-3.  Wählen Sie das bestehende Script aus oder erstellen Sie ein neues.
-4.  Ersetzen Sie den **gesamten Inhalt** durch den Code aus `pv_heater_control.js`.
-5.  Klicken Sie auf **Save** und dann auf **Start**.
-
-## Funktionsprüfung
-
-Beobachten Sie erneut die Konsole im Script-Editor.
-Erfolgreiche Ausgaben sehen so aus:
-*   `PV Heater Control v2 gestartet`
-*   `Leistung: L1=... L2=... L3=... => Total=... W`
-*   `Setze Dimmer: ...%`
-
-Falls weiterhin Fehler auftreten, kopieren Sie bitte die genaue Fehlermeldung.
+Details, Installation und Konfiguration stehen in der jeweiligen **`README.md`** im Unterordner.
