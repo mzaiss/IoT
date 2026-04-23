@@ -20,8 +20,10 @@ Kleines **Shelly-Script** für den **Shelly 1 Gen3** mit aufgestecktem **Sensor-
 ## Installation
 
 1. Shelly im Browser öffnen, unter **Scripts** ein neues Script anlegen.
-2. Inhalt von `keller_kaltluft_fan.js` einfügen, **Speichern**, dann **Start**.
+2. Inhalt von `keller_kaltluft_fan.js` **vollständig** einfügen (bis zur letzten Zeile `onTick();`), **Speichern**, dann **Start**.
 3. Für Betrieb nach Stromausfall: **„Beim Start ausführen“** aktivieren.
+
+**Fehler `Got EOF expected '}'`:** Dann is’ beim Einfügen oft was abgschnitten – nochmal aus der Datei kopieren oder Zeile ganz unten prüfen, ob noch `});` und Schließ-Klammern da sind.
 
 ## Konfiguration
 
